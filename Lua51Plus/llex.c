@@ -39,7 +39,7 @@ const char *const luaX_tokens [] = {
     "end", "false", "for", "function", "if",
     "in", "local", "nil", "not", "or", "repeat",
     "return", "then", "true", "until", "while",
-    "+=", "-=", "*=", "/=",
+    "+=", "-=", "*=", "/=", "^=", "%=",
     "..", "...", "==", ">=", "<=", "~=",
     "<number>", "<name>", "<string>", "<eof>",
     NULL
@@ -343,7 +343,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       }
       case '-': {
         next(ls);
-        if (ls->current == '=') return TK_SUBEQ;
+        if (ls->current == '=') {
+            next(ls);
+            return TK_SUBEQ;
+        }
         if (ls->current != '-') return '-';
         /* else is a comment */
         next(ls);
@@ -452,6 +455,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
                   return TK_MULEQ;
               case '/':
                   return TK_DIVEQ;
+              case '^':
+                  return TK_POWEQ;
+              case '%':
+                  return TK_MODEQ;
               }
           }
 

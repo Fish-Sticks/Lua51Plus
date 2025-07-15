@@ -932,11 +932,13 @@ static void check_conflict (LexState *ls, struct LHS_assign *lh, expdesc *v) {
   }
 }
 
-
+#include <stdio.h>
 static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
   expdesc e;
   check_condition(ls, VLOCAL <= lh->v.k && lh->v.k <= VINDEXED,
                       "syntax error");
+  
+  int oldToken = ls->t.token;
   if (testnext(ls, ',')) {  /* assignment -> `,' primaryexp assignment */
     struct LHS_assign nv;
     nv.prev = lh;
@@ -947,22 +949,46 @@ static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
                     "variables in assignment");
     assignment(ls, &nv, nvars+1);
   }
-  else if (ls->t.token == TK_ADDEQ)
+  else if (testnext(ls, TK_ADDEQ) || testnext(ls, TK_SUBEQ) || testnext(ls, TK_MULEQ) || testnext(ls, TK_DIVEQ) || testnext(ls, TK_POWEQ) || testnext(ls, TK_MODEQ))
   {
       if (nvars != 1)
-        luaX_syntaxerror(ls, "cannot assign multiple vars");
-  }
-  else if (ls->t.token == TK_SUBEQ)
-  {
-      luaX_syntaxerror(ls, "nigga bob 2");
-  }
-  else if (ls->t.token == TK_MULEQ)
-  {
-      luaX_syntaxerror(ls, "nigga bob 3");
-  }
-  else if (ls->t.token == TK_DIVEQ)
-  {
-      luaX_syntaxerror(ls, "nigga bob 4");
+          luaX_syntaxerror(ls, "cannot assign multiple vars");
+
+      // Parse assignment expression
+      expr(ls, &e);
+      luaK_setoneret(ls->fs, &e);
+
+      // This will be created into a register with the evaluated result after the addition is preformed.
+      expdesc outputValue = lh->v;
+
+      // Preform var = var {+-*/} e
+      switch (oldToken)
+      {
+      case TK_ADDEQ:
+          luaK_posfix(ls->fs, OPR_ADD, &outputValue, &e);
+          break;
+      case TK_SUBEQ:
+          luaK_posfix(ls->fs, OPR_SUB, &outputValue, &e);
+          break;
+      case TK_MULEQ:
+          luaK_posfix(ls->fs, OPR_MUL, &outputValue, &e);
+          break;
+      case TK_DIVEQ:
+          luaK_posfix(ls->fs, OPR_DIV, &outputValue, &e);
+          break;
+      case TK_POWEQ:
+          luaK_posfix(ls->fs, OPR_POW, &outputValue, &e);
+          break;
+      case TK_MODEQ:
+          luaK_posfix(ls->fs, OPR_MOD, &outputValue, &e);
+          break;
+      default:
+          luaX_syntaxerror(ls, "unexpected operation");
+      }
+
+      // Store the variable with the result
+      luaK_storevar(ls->fs, &lh->v, &outputValue);
+      return;
   }
   else {  /* assignment -> `=' explist1 */
     int nexps;
@@ -979,6 +1005,7 @@ static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
       return;  /* avoid default */
     }
   }
+
   init_exp(&e, VNONRELOC, ls->fs->freereg-1);  /* default assignment */
   luaK_storevar(ls->fs, &lh->v, &e);
 }
