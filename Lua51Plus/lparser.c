@@ -40,6 +40,7 @@
 typedef struct BlockCnt {
   struct BlockCnt *previous;  /* chain */
   int breaklist;  /* list of jumps out of this loop */
+  int continuelist; // list of jumps to continue iteration
   lu_byte nactvar;  /* # active locals outside the breakable structure */
   lu_byte upval;  /* true if some variable in the block is an upvalue */
   lu_byte isbreakable;  /* true if `block' is a loop */
@@ -284,6 +285,7 @@ static void enterlevel (LexState *ls) {
 
 static void enterblock (FuncState *fs, BlockCnt *bl, lu_byte isbreakable) {
   bl->breaklist = NO_JUMP;
+  bl->continuelist = NO_JUMP;
   bl->isbreakable = isbreakable;
   bl->nactvar = fs->nactvar;
   bl->upval = 0;
@@ -932,7 +934,6 @@ static void check_conflict (LexState *ls, struct LHS_assign *lh, expdesc *v) {
   }
 }
 
-#include <stdio.h>
 static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
   expdesc e;
   check_condition(ls, VLOCAL <= lh->v.k && lh->v.k <= VINDEXED,
@@ -949,7 +950,8 @@ static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
                     "variables in assignment");
     assignment(ls, &nv, nvars+1);
   }
-  else if (testnext(ls, TK_ADDEQ) || testnext(ls, TK_SUBEQ) || testnext(ls, TK_MULEQ) || testnext(ls, TK_DIVEQ) || testnext(ls, TK_POWEQ) || testnext(ls, TK_MODEQ))
+  else if (testnext(ls, TK_ADDEQ) || testnext(ls, TK_SUBEQ) || testnext(ls, TK_MULEQ) || testnext(ls, TK_DIVEQ) || testnext(ls, TK_POWEQ) || testnext(ls, TK_MODEQ)
+      || testnext(ls, TK_CONCATEQ))
   {
       if (nvars != 1)
           luaX_syntaxerror(ls, "cannot assign multiple vars");
@@ -957,6 +959,7 @@ static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
       // Parse assignment expression
       expr(ls, &e);
       luaK_setoneret(ls->fs, &e);
+      luaK_exp2val(ls->fs, &e);
 
       // This will be created into a register with the evaluated result after the addition is preformed.
       expdesc outputValue = lh->v;
@@ -982,11 +985,15 @@ static void assignment (LexState *ls, struct LHS_assign *lh, int nvars) {
       case TK_MODEQ:
           luaK_posfix(ls->fs, OPR_MOD, &outputValue, &e);
           break;
+      case TK_CONCATEQ: // This one is different because operands MUST be on the stack, so we need to prepare them before doing posfix. If we don't it will incorrectly form the string.
+          luaK_infix(ls->fs, OPR_CONCAT, &outputValue);
+          luaK_infix(ls->fs, OPR_CONCAT, &e);
+          luaK_posfix(ls->fs, OPR_CONCAT, &outputValue, &e);
+          break;
       default:
           luaX_syntaxerror(ls, "unexpected operation");
       }
 
-      // Store the variable with the result
       luaK_storevar(ls->fs, &lh->v, &outputValue);
       return;
   }
@@ -1036,7 +1043,45 @@ static void breakstat (LexState *ls) {
   luaK_concat(fs, &bl->breaklist, luaK_jump(fs));
 }
 
+/*
+    In this implementation I made a custom field for blocks called the continue list, and the last jump back for loops is inserted into it, along with whatever else calls
+    this stat. This means at the end of the loop block, all these continues are patched to jump back to the start of the loop similar to how break jumps to the end.
+*/
+static void continuestat(LexState* ls) {
+    FuncState* fs = ls->fs;
+    BlockCnt* bl = fs->bl;
 
+    while (bl && !bl->isbreakable) { // Find the parent loop block
+        bl = bl->previous;
+    }
+
+    if (!bl)
+        luaX_syntaxerror(ls, "no loop to continue");
+
+    luaK_concat(fs, &bl->continuelist, luaK_jump(fs)); // Insert to pending jump list
+}
+
+
+/*
+    Some information to help understand how the continue implementation will work from reading break statements:
+    bl->breaklist is a list to store the count of pending jumps which are breaks.
+    leaveblock will finalize all these jumps at the end, to exit obviously, and kill upvalues.
+    luaK_patchtohere signals to tell all pending jumps on the stack to jump to its current location
+    condexit is another list which will get used for pending jump exits.
+    luaK_jump inserts into the pending jump list. (  int jpc = fs->jpc; save list of jumps to here)
+    luaK_getlabel sets a jump target at the current location. (start of the loop)
+    luaK_patchlist goes through a list and resolves to a label such as whileinit (it stores all the pending jump locations from inside the block, such as our loop).
+    We can write our own luaK_jump to tell the compiler to resolve our jump to the start again, as it will be part of the list appended by patchlist which flows nicely
+    with lua's logic. This means we don't need to write a continue list like how the break list is written as it will be in the block (or SHOULD be, it could break with
+    depthed blocks).
+
+    The reason we need these lists and weird stack system is because Lua doesn't know the final address of all the code until the block is finished parsing, so it does
+    "patches" which hold locations like labels, and lists of jumps to resolve for when it exits in leaveblock.
+
+    In other words the lists like breaklist are just a bunch of luaK_jump descriptions which also get appended to the jpc table.
+    When u call patchlist it goes through all of them and patches them to a desired target made with something like luaK_getlabel which is just a pc location.
+    Take the analysis with a grain of salt, I could've misworded my understanding.
+*/
 static void whilestat (LexState *ls, int line) {
   /* whilestat -> WHILE cond DO block END */
   FuncState *fs = ls->fs;
@@ -1049,7 +1094,8 @@ static void whilestat (LexState *ls, int line) {
   enterblock(fs, &bl, 1);
   checknext(ls, TK_DO);
   block(ls);
-  luaK_patchlist(fs, luaK_jump(fs), whileinit);
+  luaK_concat(fs, &bl.continuelist, luaK_jump(fs)); // Insert the final ending jump back into the continue list we made
+  luaK_patchlist(fs, bl.continuelist, whileinit); // Patch all jumps to the start of the loop
   check_match(ls, TK_END, TK_WHILE, line);
   leaveblock(fs);
   luaK_patchtohere(fs, condexit);  /* false conditions finish the loop */
@@ -1067,6 +1113,7 @@ static void repeatstat (LexState *ls, int line) {
   luaX_next(ls);  /* skip REPEAT */
   chunk(ls);
   check_match(ls, TK_UNTIL, TK_REPEAT, line);
+  luaK_patchtohere(ls->fs, bl1.continuelist); // Our continue should resume here before the condition check, so that it respects the conditional check.
   condexit = cond(ls);  /* read condition (inside scope block) */
   if (!bl2.upval) {  /* no upvalues? */
     leaveblock(fs);  /* finish scope */
@@ -1105,11 +1152,13 @@ static void forbody (LexState *ls, int base, int line, int nvars, int isnum) {
   luaK_reserveregs(fs, nvars);
   block(ls);
   leaveblock(fs);  /* end of scope for declared variables */
+  int forLoop = luaK_getlabel(fs); // Creates a label to jump to when we patch our continue jumps.
   luaK_patchtohere(fs, prep);
   endfor = (isnum) ? luaK_codeAsBx(fs, OP_FORLOOP, base, NO_JUMP) :
                      luaK_codeABC(fs, OP_TFORLOOP, base, 0, nvars);
   luaK_fixline(fs, line);  /* pretend that `OP_FOR' starts the loop */
   luaK_patchlist(fs, (isnum ? endfor : luaK_jump(fs)), prep + 1);
+  luaK_patchlist(fs, bl.previous->continuelist, forLoop); // Patch all continues to jump to loop
 }
 
 
@@ -1362,6 +1411,11 @@ static int statement (LexState *ls) {
       luaX_next(ls);  /* skip BREAK */
       breakstat(ls);
       return 1;  /* must be last statement */
+    }
+    case TK_CONTINUE: {
+        luaX_next(ls); // skip CONTINUE
+        continuestat(ls);
+        return 0;
     }
     default: {
       exprstat(ls);

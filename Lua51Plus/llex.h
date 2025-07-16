@@ -29,7 +29,8 @@ enum RESERVED {
   TK_RETURN, TK_THEN, TK_TRUE, TK_UNTIL, TK_WHILE,
 
   /* luaPLUS symbols */
-  TK_ADDEQ, TK_SUBEQ, TK_MULEQ, TK_DIVEQ, TK_POWEQ, TK_MODEQ,
+  TK_CONTINUE,
+  TK_ADDEQ, TK_SUBEQ, TK_MULEQ, TK_DIVEQ, TK_POWEQ, TK_MODEQ, TK_CONCATEQ,
 
   /* other terminal symbols */
   TK_CONCAT, TK_DOTS, TK_EQ, TK_GE, TK_LE, TK_NE, TK_NUMBER,
@@ -38,7 +39,7 @@ enum RESERVED {
 
 
 /* number of reserved words */
-#define NUM_RESERVED	(cast(int, TK_WHILE-FIRST_RESERVED+1))
+#define NUM_RESERVED	(cast(int, TK_CONTINUE-FIRST_RESERVED+1))
 
 
 /* array with token `names' */

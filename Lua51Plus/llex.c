@@ -39,7 +39,8 @@ const char *const luaX_tokens [] = {
     "end", "false", "for", "function", "if",
     "in", "local", "nil", "not", "or", "repeat",
     "return", "then", "true", "until", "while",
-    "+=", "-=", "*=", "/=", "^=", "%=",
+    "continue",
+    "+=", "-=", "*=", "/=", "^=", "%=", "..=",
     "..", "...", "==", ">=", "<=", "~=",
     "<number>", "<name>", "<string>", "<eof>",
     NULL
@@ -331,7 +332,6 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
                                    luaZ_bufflen(ls->buff) - 2);
 }
 
-
 static int llex (LexState *ls, SemInfo *seminfo) {
   luaZ_resetbuffer(ls->buff);
   for (;;) {
@@ -393,6 +393,16 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         if (ls->current != '=') return '~';
         else { next(ls); return TK_NE; }
       }
+      case '!': {
+          next(ls);
+          if (ls->current != '=') return '!';
+          else { next(ls); return TK_NE; }
+      }
+      case '&': {
+          next(ls);
+          if (ls->current != '&') return '&';
+          else { next(ls); return TK_AND; }
+      }
       case '"':
       case '\'': {
         read_string(ls, ls->current, seminfo);
@@ -401,9 +411,20 @@ static int llex (LexState *ls, SemInfo *seminfo) {
       case '.': {
         save_and_next(ls);
         if (check_next(ls, ".")) {
-          if (check_next(ls, "."))
-            return TK_DOTS;   /* ... */
-          else return TK_CONCAT;   /* .. */
+            if (check_next(ls, "."))
+            {
+                return TK_DOTS;   /* ... */
+            }
+            else
+            {
+                if (ls->current == '=')
+                {
+                    next(ls);
+                    return TK_CONCATEQ;
+                }
+                else
+                    return TK_CONCAT;
+            }
         }
         else if (!isdigit(ls->current)) return '.';
         else {
