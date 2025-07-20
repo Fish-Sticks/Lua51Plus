@@ -6,6 +6,10 @@ Custom assignment using operators such as: +=, -=, *=, /=, ^=, %=, !=, &&, ..=
 <br>
 **Note**: Custom assignment must be singular expression such as var `=´ exp (no comma separated).  
 <br>
+JSON keyword and parser, just type json{} or json[] to parse the json. Any inner objects/arrays are automatically parsed as JSON.
+<br>
+**nil** has the alias **null**.
+<br>
 Ability to call functions without parenthesis providing numbers (previously only strings and tables).
 <br>
 Example: func "hello", func 123, func {} is the equivalent of: func("hello"), func(123), func({})
