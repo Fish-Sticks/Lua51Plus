@@ -497,7 +497,176 @@ static void listfield (LexState *ls, struct ConsControl *cc) {
 }
 
 
+// Custom JSON parser constructor, this must be written separate from normal lua since we want strictly JSON syntax, but access to lua information like vars.
+// It's also so we don't leak syntax such as [] arrays into the full syntax
+
+void jsonExpr(LexState* ls, expdesc* v);
+void primaryexp(LexState* ls, expdesc* v);
+
+static void jsonListfield(LexState* ls, struct ConsControl* cc) {
+    jsonExpr(ls, &cc->v);
+    luaY_checklimit(ls->fs, cc->na, MAX_INT, "items in a constructor");
+    cc->na++;
+    cc->tostore++;
+}
+
+#include <stdio.h>
+static void jsonRecfield(LexState* ls, struct ConsControl* cc) {
+    /* jsonRecfield -> (NAME | STRING | NUMBER | `['jsonExp`]') `:` jsonExp */
+    FuncState* fs = ls->fs;
+    int reg = ls->fs->freereg;
+    expdesc key, val;
+    int rkkey;
+
+    luaY_checklimit(fs, cc->nh, MAX_INT, "items in a constructor");
+    switch (ls->t.token)
+    {
+    case TK_NAME: {
+        checkname(ls, &key);
+        break;
+    }
+    case TK_STRING: {
+        codestring(ls, &key, ls->t.seminfo.ts);
+        luaX_next(ls);
+        break;
+    }
+    case TK_NUMBER: {
+        init_exp(&key, VKNUM, 0);
+        key.u.nval = ls->t.seminfo.r;
+        luaX_next(ls);
+        break;
+    }
+    case '[': {
+        luaX_next(ls);  /* skip the '[' */
+        jsonExpr(ls, &key);
+        luaK_exp2val(ls->fs, &key);
+        checknext(ls, ']');
+        break;
+    }
+    default:
+        luaX_syntaxerror(ls, "unexpected key value");
+        break;
+    }
+
+    cc->nh++;
+    checknext(ls, ':');
+    rkkey = luaK_exp2RK(fs, &key);
+    jsonExpr(ls, &val);
+    luaK_codeABC(fs, OP_SETTABLE, cc->t->u.s.info, rkkey, luaK_exp2RK(fs, &val));
+    fs->freereg = reg;  /* free registers */
+}
+
+static void jsonArrayConstructor(LexState* ls, expdesc* t)
+{
+    FuncState* fs = ls->fs;
+    int line = ls->linenumber;
+    int pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
+    struct ConsControl cc;
+    cc.na = cc.nh = cc.tostore = 0;
+    cc.t = t;
+    init_exp(t, VRELOCABLE, pc);
+    init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
+    luaK_exp2nextreg(ls->fs, t);  /* fix it at stack top (for gc) */
+
+    checknext(ls, '[');
+    do
+    {
+        if (ls->t.token == ']') break;
+        closelistfield(fs, &cc);
+        jsonListfield(ls, &cc);
+    } while (testnext(ls, ','));
+    check_match(ls, ']', '[', line);
+    lastlistfield(fs, &cc);
+    SETARG_B(fs->f->code[pc], luaO_int2fb(cc.na)); /* set initial array size */
+    SETARG_C(fs->f->code[pc], luaO_int2fb(cc.nh));  /* set initial table size */
+}
+
+static void jsonObjectConstructor(LexState* ls, expdesc* t)
+{
+    FuncState* fs = ls->fs;
+    int line = ls->linenumber;
+    int pc = luaK_codeABC(fs, OP_NEWTABLE, 0, 0, 0);
+    struct ConsControl cc;
+    cc.na = cc.nh = cc.tostore = 0;
+    cc.t = t;
+    init_exp(t, VRELOCABLE, pc);
+    init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
+    luaK_exp2nextreg(ls->fs, t);  /* fix it at stack top (for gc) */
+
+    checknext(ls, '{');
+    do
+    {
+        if (ls->t.token == '}') break;
+        closelistfield(fs, &cc);
+        jsonRecfield(ls, &cc);
+    } while (testnext(ls, ','));
+    check_match(ls, '}', '{', line);
+    lastlistfield(fs, &cc);
+    SETARG_B(fs->f->code[pc], luaO_int2fb(cc.na)); /* set initial array size */
+    SETARG_C(fs->f->code[pc], luaO_int2fb(cc.nh));  /* set initial table size */
+}
+
+static void jsonExpr(LexState* ls, expdesc* v)
+{
+    switch (ls->t.token) {
+    case TK_NUMBER: {
+        init_exp(v, VKNUM, 0);
+        v->u.nval = ls->t.seminfo.r;
+        break;
+    }
+    case TK_STRING: {
+        codestring(ls, v, ls->t.seminfo.ts);
+        break;
+    }
+    case TK_NULL:
+    case TK_NIL: {
+        init_exp(v, VNIL, 0);
+        break;
+    }
+    case TK_TRUE: {
+        init_exp(v, VTRUE, 0);
+        break;
+    }
+    case TK_FALSE: {
+        init_exp(v, VFALSE, 0);
+        break;
+    }
+    case '[': {
+        jsonArrayConstructor(ls, v);
+        return;
+    }
+    case '{': {
+        jsonObjectConstructor(ls, v);
+        return;
+    }
+    default: {
+        primaryexp(ls, v);
+        return;
+    }
+    }
+    luaX_next(ls);
+}
+
+// Normal lua table constructor
 static void constructor (LexState *ls, expdesc *t) {
+    if (testnext(ls, TK_JSON))
+    {
+        switch (ls->t.token)
+        {
+        case '[':
+            jsonArrayConstructor(ls, t);
+            break;
+        case '{':
+            jsonObjectConstructor(ls, t);
+            break;
+        default:
+            luaX_syntaxerror(ls, "invalid json information");
+            break;
+        }
+
+        return;
+    }
+
   /* constructor -> ?? */
   FuncState *fs = ls->fs;
   int line = ls->linenumber;
@@ -508,6 +677,7 @@ static void constructor (LexState *ls, expdesc *t) {
   init_exp(t, VRELOCABLE, pc);
   init_exp(&cc.v, VVOID, 0);  /* no value (yet) */
   luaK_exp2nextreg(ls->fs, t);  /* fix it at stack top (for gc) */
+
   checknext(ls, '{');
   do {
     lua_assert(cc.v.k == VVOID || cc.tostore > 0);
@@ -627,6 +797,7 @@ static void funcargs (LexState *ls, expdesc *f) {
       check_match(ls, ')', '(', line);
       break;
     }
+    case TK_JSON:
     case '{': {  /* funcargs -> constructor */
       constructor(ls, &args);
       break;
@@ -744,6 +915,7 @@ static void simpleexp (LexState *ls, expdesc *v) {
       codestring(ls, v, ls->t.seminfo.ts);
       break;
     }
+    case TK_NULL:
     case TK_NIL: {
       init_exp(v, VNIL, 0);
       break;
@@ -764,6 +936,7 @@ static void simpleexp (LexState *ls, expdesc *v) {
       init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 1, 0));
       break;
     }
+    case TK_JSON:
     case '{': {  /* constructor */
       constructor(ls, v);
       return;
@@ -1442,6 +1615,3 @@ static void chunk (LexState *ls) {
 }
 
 /* }====================================================================== */
-
-
-// TODO: ADD "continue" TOO

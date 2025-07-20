@@ -29,7 +29,7 @@ enum RESERVED {
   TK_RETURN, TK_THEN, TK_TRUE, TK_UNTIL, TK_WHILE,
 
   /* luaPLUS symbols */
-  TK_CONTINUE,
+  TK_NULL, TK_JSON, TK_CONTINUE,
   TK_ADDEQ, TK_SUBEQ, TK_MULEQ, TK_DIVEQ, TK_POWEQ, TK_MODEQ, TK_CONCATEQ,
 
   /* other terminal symbols */
