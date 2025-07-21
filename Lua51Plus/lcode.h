@@ -19,6 +19,8 @@
 */
 #define NO_JUMP (-1)
 
+#define NO_LABEL (-1)
+
 
 /*
 ** grep "ORDER OPR" if you change these enums

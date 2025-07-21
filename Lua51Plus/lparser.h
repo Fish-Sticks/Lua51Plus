@@ -53,6 +53,12 @@ typedef struct upvaldesc {
 
 struct BlockCnt;  /* defined in lparser.c */
 
+typedef struct labeldesc
+{
+    int pc; // The PC of the label itself, which may or may not be present.
+    int patchList; // List of all the PCs that jump to it.
+    TString* source;
+} labeldesc;
 
 /* state needed to generate code for a given function */
 typedef struct FuncState {
@@ -72,6 +78,8 @@ typedef struct FuncState {
   lu_byte nactvar;  /* number of active local variables */
   upvaldesc upvalues[LUAI_MAXUPVALUES];  /* upvalues */
   unsigned short actvar[LUAI_MAXVARS];  /* declared-variable stack */
+  labeldesc labels[LUAI_MAXLABELS]; /* named labels */
+  int nl; /* number of labels */
 } FuncState;
 
 

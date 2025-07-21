@@ -483,6 +483,12 @@
 
 
 /*
+@@ LUAI_MAXUPVALUES is the maximum number of labels per function
+*/
+#define LUAI_MAXLABELS	60
+
+
+/*
 @@ LUAL_BUFFERSIZE is the buffer size used by the lauxlib buffer system.
 */
 #define LUAL_BUFFERSIZE		BUFSIZ

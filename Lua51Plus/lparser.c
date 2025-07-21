@@ -341,6 +341,7 @@ static void open_func (LexState *ls, FuncState *fs) {
   fs->freereg = 0;
   fs->nk = 0;
   fs->np = 0;
+  fs->nl = 0;
   fs->nlocvars = 0;
   fs->nactvar = 0;
   fs->bl = NULL;
@@ -355,10 +356,12 @@ static void open_func (LexState *ls, FuncState *fs) {
 }
 
 
+static void checklabels(FuncState* fs);
 static void close_func (LexState *ls) {
   lua_State *L = ls->L;
   FuncState *fs = ls->fs;
   Proto *f = fs->f;
+  checklabels(fs);
   removevars(ls, 0);
   luaK_ret(fs, 0, 0);  /* final return */
   luaM_reallocvector(L, f->code, f->sizecode, fs->pc, Instruction);
@@ -510,7 +513,6 @@ static void jsonListfield(LexState* ls, struct ConsControl* cc) {
     cc->tostore++;
 }
 
-#include <stdio.h>
 static void jsonRecfield(LexState* ls, struct ConsControl* cc) {
     /* jsonRecfield -> (NAME | STRING | NUMBER | `['jsonExp`]') `:` jsonExp */
     FuncState* fs = ls->fs;
@@ -1538,6 +1540,68 @@ static void retstat (LexState *ls) {
   luaK_ret(fs, first, nret);
 }
 
+static labeldesc* newlabel(FuncState* fs, TString* source)
+{
+    luaY_checklimit(fs, fs->nl + 1, LUAI_MAXLABELS, "labels");
+
+    fs->labels[fs->nl].pc = NO_LABEL;
+    fs->labels[fs->nl].source = source;
+    fs->labels[fs->nl].patchList = NO_JUMP;
+    fs->nl++;
+
+    return &fs->labels[fs->nl - 1];
+}
+
+static labeldesc* findlabel(FuncState* fs, TString* source)
+{
+    for (int i = 0; i < fs->nl; i++)
+    {
+        if (fs->labels[i].source == source)
+            return &fs->labels[i];
+    }
+
+    return newlabel(fs, source);
+}
+
+static void checklabels(FuncState* fs)
+{
+    for (int i = 0; i < fs->nl; i++)
+    {
+        if (fs->labels[i].pc == NO_LABEL)
+            luaX_syntaxerror(fs->ls, luaO_pushfstring(fs->L, "label " LUA_QS " not defined", getstr(fs->labels[i].source)));
+    }
+}
+
+static void marklabel(FuncState* fs, TString* source)
+{
+    labeldesc* label = findlabel(fs, source);
+    if (label->pc != NO_LABEL)
+        luaX_syntaxerror(fs->ls, luaO_pushfstring(fs->L, "label " LUA_QS " already defined", getstr(source)));
+
+    label->pc = luaK_getlabel(fs);
+    luaK_patchlist(fs, label->patchList, label->pc); // Update the patchlist now that the label location is known
+}
+
+static void jumplabel(FuncState* fs, TString* source)
+{
+    labeldesc* label = findlabel(fs, source);
+    if (label->pc == NO_LABEL) { // If the PC isn't known yet, then we insert to pending jump list (label isn't declared yet)
+        luaK_concat(fs, &label->patchList, luaK_jump(fs));
+    }
+    else { // Otherwise we can immediately patch the jump
+        luaK_patchlist(fs, luaK_jump(fs), label->pc);
+    }
+}
+
+static void labelstat(LexState* ls) {
+    TString* label = str_checkname(ls);
+    marklabel(ls->fs, label);
+}
+
+static void gotostat(LexState* ls) {
+    TString* label = str_checkname(ls);
+    jumplabel(ls->fs, label);
+}
 
 static int statement (LexState *ls) {
   int line = ls->linenumber;  /* may be needed for error messages */
@@ -1588,6 +1652,16 @@ static int statement (LexState *ls) {
     case TK_CONTINUE: {
         luaX_next(ls); // skip CONTINUE
         continuestat(ls);
+        return 0;
+    }
+    case TK_GOTO: {
+        luaX_next(ls);
+        gotostat(ls);
+        return 0;
+    }
+    case TK_LABEL: {
+        luaX_next(ls);
+        labelstat(ls);
         return 0;
     }
     default: {
