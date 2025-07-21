@@ -27,5 +27,4 @@ end
 ```
 <br>This behavior works with all types of loops.
 
-<br>
-**For more information check out the test script!**
+<br>**For more information check out the test script!**
