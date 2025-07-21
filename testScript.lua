@@ -10,6 +10,10 @@ print "Written by fishy!"
 		Can call functions with numbers without (), ex: abc 15
 --]]
 
+
+
+
+-- Json parser test
 -- https://opensource.adobe.com/Spry/samples/data_region/JSONDataSetSample.html
 local jsonSample = json[
 	{
@@ -88,11 +92,132 @@ function readJson(num)
 end
 
 
+-- Calling functions with numbers test
 readJson 1
 readJson 2
 readJson 3
 
 
+-- Addition assignment and continue statement test
+sum = 0
 for i = 1, 50 do
-	if i % 5 == 0 then continue end
+	if i % 5 != 0 then continue else print("mod 5:", i); sum += i end
 end
+
+print("sum:", sum)
+
+
+
+-- Label test
+print("Hello there!")
+
+for i = 1, 100 do
+	print("the loop is:", i)
+	goto skipEnding
+	print"I will never speak"
+end
+
+label sayDone
+print"loop is done!"
+goto errorTests
+
+label skipEnding
+print"I am finished!"
+for x = 1, 100 do 
+	print(x)
+	if x == 5 then 
+		goto sayDone 
+	else 
+		continue 
+	end
+end
+
+label errorTests
+
+local function print2(_, msg)
+	print(msg)
+end	
+
+print2(loadstring([[
+goto a
+goto b
+goto c
+goto d
+goto e
+goto f
+goto g
+goto h
+goto i
+goto j
+goto k
+goto l
+goto m
+goto n
+goto o
+goto p
+goto q
+goto r
+goto s
+goto t
+goto u
+goto v
+goto w
+goto x
+goto y
+goto z
+goto A
+goto B
+goto C
+goto D
+goto E
+goto F
+goto G
+goto H
+goto H1
+goto H2
+goto H3
+goto H4
+goto H5
+goto H6
+goto H7
+goto H8
+goto H0
+goto H9
+goto H10
+goto H11
+goto H12
+goto H13
+goto H14
+goto H15
+goto H16
+goto H17
+goto H18
+goto H19
+goto H20
+goto H21
+goto H22
+goto H23
+goto H24
+goto H25
+goto H26
+goto H27
+goto H28
+goto H29
+goto H30
+goto H31
+goto H32
+goto H33
+]]))
+
+print2(loadstring([[
+	label x
+	label y
+	goto y
+	label y
+]]))
+
+print2(loadstring([[
+	goto x
+]]))
+
+print"Test script is done!"
